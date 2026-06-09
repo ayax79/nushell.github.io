@@ -258,6 +258,186 @@ If you want to see all the dataframe commands that are available you
 can use `scope commands | where category =~ dataframe`
 :::
 
+
+## Cloud Storage Support
+
+Polars dataframes support reading data directly from cloud storage providers like AWS S3,
+Google Cloud Storage (GCS), and Azure Blob Storage. This allows you to work with large
+datasets stored in the cloud without needing to download them locally first.
+
+### AWS S3
+
+To read files from S3, you can use S3 URLs directly with the `polars open` command:
+
+```nu
+# Read a CSV file from S3
+let df = polars open s3://my-bucket/data/file.csv
+
+# Read a Parquet file from S3
+let df = polars open s3://my-bucket/data/file.parquet
+```
+
+For S3 access, you need to configure your AWS credentials. Polars will automatically use
+credentials from:
+
+- Environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`)
+- AWS credentials file (`~/.aws/credentials`)
+- IAM roles (when running on EC2 or ECS)
+
+You can also specify credentials using environment variables:
+
+```nu
+# Set AWS credentials
+$env.AWS_ACCESS_KEY_ID = "your-access-key"
+$env.AWS_SECRET_ACCESS_KEY = "your-secret-key"
+$env.AWS_REGION = "us-east-1"
+
+# Now read from S3
+let df = polars open s3://my-bucket/data/file.csv
+```
+
+### Google Cloud Storage (GCS)
+
+Similarly, you can read from GCS using `gs://` URLs:
+
+```nu
+# Read a CSV file from GCS
+let df = polars open gs://my-bucket/data/file.csv
+
+# Read a Parquet file from GCS
+let df = polars open gs://my-bucket/data/file.parquet
+```
+
+For GCS access, configure authentication using:
+
+- The `GOOGLE_APPLICATION_CREDENTIALS` environment variable pointing to your service account key
+- Default application credentials (when running on GCP)
+
+```nu
+$env.GOOGLE_APPLICATION_CREDENTIALS = "/path/to/service-account-key.json"
+let df = polars open gs://my-bucket/data/file.csv
+```
+
+### Azure Blob Storage
+
+Azure Blob Storage is supported using `az://` or `azure://` URLs:
+
+```nu
+# Read from Azure Blob Storage
+let df = polars open az://my-container/data/file.csv
+
+# Alternative URL format
+let df = polars open azure://my-container/data/file.parquet
+```
+
+Configure Azure credentials using:
+
+- Environment variables (`AZURE_STORAGE_ACCOUNT`, `AZURE_STORAGE_ACCOUNT_KEY` or `AZURE_STORAGE_SAS_TOKEN`)
+- Azure CLI authentication
+
+```nu
+$env.AZURE_STORAGE_ACCOUNT = "your-storage-account"
+$env.AZURE_STORAGE_KEY = "your-account-key"
+let df = polars open az://my-container/data/file.csv
+```
+
+### HTTP/HTTPS URLs
+
+You can also read files directly from HTTP/HTTPS URLs:
+
+```nu
+# Read from a public URL
+let df = polars open https://example.com/data/file.csv
+
+# Read a Parquet file from a URL
+let df = polars open https://data.source.com/dataset.parquet
+```
+
+### Lazy Loading from Cloud Storage
+
+When working with large cloud datasets, using lazy dataframes is highly recommended
+to avoid loading the entire dataset into memory:
+
+```nu
+# Create a lazy dataframe from S3 (default behavior)
+let lf = polars open s3://my-bucket/large-dataset.parquet
+
+# Perform operations on the lazy frame
+let result = $lf
+    | polars filter (polars col year | polars gt 2020)
+    | polars select [date amount category]
+    | polars group-by category
+    | polars agg (polars col amount | polars sum)
+    | polars collect  # Only now is the data actually read and processed
+```
+
+### Saving to Cloud Storage
+
+You can also save dataframes directly to cloud storage using the `polars save` command:
+
+```nu
+# Save to S3
+$df | polars save s3://my-bucket/output/result.parquet
+
+# Save to GCS
+$df | polars save gs://my-bucket/output/result.csv
+
+# Save to Azure
+$df | polars save az://my-container/output/result.parquet
+```
+
+### Supported File Formats
+
+Cloud storage operations support the same file formats as local operations:
+
+- **CSV/TSV**: Text-based formats, good for compatibility
+- **Parquet**: Columnar format, excellent for analytics and compression
+- **JSON/JSONL (NDJSON)**: Newline-delimited JSON
+- **Arrow/IPC**: Apache Arrow format for zero-copy data sharing
+- **Avro**: Row-based format with schema evolution
+
+Parquet is generally recommended for cloud storage due to its excellent compression
+and efficient columnar layout, which minimizes data transfer costs.
+
+### Example: Complete Cloud Workflow
+
+Here's a complete example of reading from S3, processing data, and saving results:
+
+```nu
+# Set up AWS credentials
+$env.AWS_REGION = "us-east-1"
+
+# Read data from S3 as a lazy frame
+let sales_data = polars open s3://company-data/sales/2024/transactions.parquet
+
+# Process the data
+let summary = $sales_data
+    | polars filter (polars col amount | polars gt 100)
+    | polars group-by [region product]
+    | polars agg [
+        (polars col amount | polars sum | polars as total_sales)
+        (polars col amount | polars mean | polars as avg_sale)
+        (polars col transaction_id | polars count | polars as num_transactions)
+    ]
+    | polars sort-by total_sales --reverse
+    | polars collect
+
+# Save results back to S3
+$summary | polars save s3://company-data/reports/sales-summary-2024.parquet
+
+# Also save as CSV for other tools
+$summary | polars save s3://company-data/reports/sales-summary-2024.csv
+```
+
+::: tip Performance Tips
+When working with cloud storage:
+- Use Parquet format for better compression and faster reads
+- Use lazy dataframes to minimize data transfer
+- Filter and select columns early to reduce the amount of data downloaded
+- Consider partitioning large datasets for parallel processing
+- Be aware of cloud provider data egress costs
+:::
+
 ## Basic Aggregations
 
 Let's start with basic aggregations on the dataframe. Let's sum all the columns
